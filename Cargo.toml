@@ -1,0 +1,51 @@
+[package]
+name = "stake-pool-tools"
+edition = "2021"
+version = "0.1.0"
+description = ""
+
+[dependencies]
+borsh = "0.10"
+bytemuck = "1.13"
+clap = { version = "4.1.11", features = ["derive", "env"] }
+dotenv = "0.15.0"
+env_logger = "0.9.0"
+futures = "0.3.21"
+itertools = "0.10.5"
+log = "0.4.20"
+num-derive = "0.4"
+num-traits = "0.2.15"
+im = "15.1.0"
+serde = "1.0.188"
+serde_json = "1.0.107"
+thiserror = "1.0.49"
+
+anchor-lang = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-accounts-db = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-client = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-ledger = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-runtime = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-stake-program = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-vote = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-tip-distributor = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+spl-token = "=4.0.0"
+spl-pod = "=0.1.0"
+
+[[bin]]
+name = "generate-metas"
+path = "src/bin/generate-metas.rs"
+
+[[bin]]
+name = "generate-normalized-stats"
+path = "src/bin/generate-normalized-stats.rs"
+
+[[bin]]
+name = "test"
+path = "src/bin/test.rs"
+
+[patch.crates-io]
+crossbeam-epoch = { git = "https://github.com/solana-labs/crossbeam", rev = "fd279d707025f0e60951e429bf778b4813d1b6bf" }
+solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }
+solana-zk-token-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "326c848800f7e92c1494d7954c0955fa822cd8d4" }

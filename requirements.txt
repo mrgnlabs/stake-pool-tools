@@ -1,0 +1,4 @@
+solana
+requests
+tqdm
+google-cloud-storage
