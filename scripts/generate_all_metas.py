@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import glob
 import os
 import re
 import sys
@@ -9,6 +10,23 @@ import shutil
 
 
 GENERATOR_BINARY = "generate-metas"
+
+
+def delete_artifacts(epoch_dir: str):
+    rocksdb_dir = os.path.join(epoch_dir, "rocksdb")
+    if os.path.exists(rocksdb_dir) and os.path.isdir(rocksdb_dir):
+        shutil.rmtree(rocksdb_dir)
+    accounts_dir = os.path.join(epoch_dir, "stake-pools.accounts")
+    if os.path.exists(accounts_dir) and os.path.isdir(accounts_dir):
+        shutil.rmtree(accounts_dir)
+    genesis_unpacked_dir = os.path.join(epoch_dir, "genesis.bin")
+    if os.path.isfile(genesis_unpacked_dir):
+        os.remove(genesis_unpacked_dir)
+    tmp_folder_pattern = os.path.join(epoch_dir, "tmp-snapshot-archive-*")
+    matching_dirs = glob.glob(tmp_folder_pattern)
+    for dir_path in matching_dirs:
+        if os.path.exists(dir_path) and os.path.isdir(dir_path):
+            shutil.rmtree(dir_path)
 
 
 def main():
@@ -44,16 +62,7 @@ def main():
                 print(f"Warning: epoch {target_epoch} not prepped. Skipping.")
                 continue
 
-            # Delete previous artifacts
-            rocksdb_dir = os.path.join(epoch_dir, "rocksdb")
-            if os.path.exists(rocksdb_dir) and os.path.isdir(rocksdb_dir):
-                shutil.rmtree(rocksdb_dir)
-            accounts_dir = os.path.join(epoch_dir, "stake-pools.accounts")
-            if os.path.exists(accounts_dir) and os.path.isdir(accounts_dir):
-                shutil.rmtree(accounts_dir)
-            genesis_unpacked_dir = os.path.join(epoch_dir, "genesis.bin")
-            if os.path.isfile(genesis_unpacked_dir):
-                os.remove(genesis_unpacked_dir)
+            delete_artifacts(epoch_dir)
 
             bin_path = os.path.realpath(
                 os.path.join(script_dir, "..", "target/release", GENERATOR_BINARY)
@@ -90,6 +99,9 @@ def main():
                 ],
                 env=env,
             )
+
+            delete_artifacts(epoch_dir)
+
             print(f"Done processing epoch {target_epoch}")
 
 
