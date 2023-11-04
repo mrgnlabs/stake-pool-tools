@@ -5,7 +5,7 @@ version = "0.1.0"
 description = ""
 
 [dependencies]
-borsh = "0.10"
+borsh = "1.0"
 bytemuck = "1.13"
 clap = { version = "4.1.11", features = ["derive", "env"] }
 dotenv = "0.15.0"
