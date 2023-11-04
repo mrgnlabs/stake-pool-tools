@@ -1,9 +1,6 @@
 use {
-    super::SECONDS_PER_DAY,
+    super::{LamportsAllocation, Rewards, StakePoolMetaApi},
     crate::{
-        apr_to_apy,
-        commands::generate_normalized_stats::EpochStakePoolStats,
-        compute_effective_stake_pool_apr, get_epoch_duration,
         get_inflation_rewards_per_validator_stake_account,
         vendors::{
             jito::JitoRewardsLookup,
@@ -15,7 +12,6 @@ use {
         },
     },
     itertools::Itertools,
-    num_traits::cast::ToPrimitive,
     serde::{Deserialize, Serialize},
     solana_accounts_db::accounts_index::{IndexKey, ScanConfig},
     solana_client::rpc_client::RpcClient,
@@ -58,98 +54,6 @@ pub fn generate_socean_stake_pool_metas(
     socean_stake_pools
 }
 
-pub fn generate_socean_stake_pool_stats(
-    rpc_client: &RpcClient,
-    target_epoch_meta: &SoceanStakePoolMeta,
-    next_epoch_meta: Option<SoceanStakePoolMeta>,
-) -> EpochStakePoolStats {
-    let (
-        active_lamports,
-        validator_undelegated_lamports,
-        activating_lamports,
-        deactivating_lamports,
-        jito_rewards,
-        inflation_rewards,
-    ) = target_epoch_meta
-        .validators
-        .iter()
-        .fold((0, 0, 0, 0, 0, 0), |acc, validator_meta| {
-            (
-                acc.0 + validator_meta.active_stake,
-                acc.1 + validator_meta.undelegated_stake,
-                acc.2 + validator_meta.activating_stake,
-                acc.3 + validator_meta.deactivating_stake,
-                acc.4 + validator_meta.jito_rewards,
-                acc.5 + validator_meta.inflation_rewards,
-            )
-        });
-
-    let epochs_per_year =
-        (SECONDS_PER_DAY as f64 * 365.0) / (target_epoch_meta.epoch_duration as f64);
-
-    let apr_potential = (inflation_rewards as f64 + jito_rewards as f64)
-        / (active_lamports as f64 + deactivating_lamports as f64)
-        * (epochs_per_year as f64);
-
-    let next_epoch_lst_price = if let Some(next_epoch_meta) = next_epoch_meta {
-        next_epoch_meta.lst_price
-    } else {
-        fetch_current_socean_stake_pool_price(
-            &rpc_client,
-            Pubkey::from_str(&target_epoch_meta.address).unwrap(),
-        )
-    };
-
-    let apr_effective = compute_effective_stake_pool_apr(
-        target_epoch_meta.lst_price,
-        next_epoch_lst_price,
-        epochs_per_year as f64,
-    );
-
-    let undelegated_lamports = target_epoch_meta.reserve_stake + validator_undelegated_lamports;
-
-    let management_fee = if target_epoch_meta.fees.epoch.denominator == 0 {
-        0.0
-    } else {
-        target_epoch_meta.fees.epoch.numerator as f64
-            / target_epoch_meta.fees.epoch.denominator as f64
-    };
-
-    EpochStakePoolStats {
-        address: target_epoch_meta.address.clone(),
-        manager: target_epoch_meta.manager.clone(),
-        provider: "Socean".to_string(),
-        management_fee,
-        is_valid: target_epoch_meta.is_valid && !target_epoch_meta.needs_update,
-        mint: target_epoch_meta.mint.clone(),
-        lst_price: target_epoch_meta.lst_price,
-        staked_validator_count: target_epoch_meta
-            .validators
-            .iter()
-            .filter(|v| {
-                v.activating_stake + v.deactivating_stake + v.active_stake + v.undelegated_stake
-                    > 1_000_000_000
-                    && v.status == "Active"
-            })
-            .count() as u64,
-        pool_token_supply: target_epoch_meta.pool_token_supply,
-        undelegated_lamports,
-        total_lamports_locked: undelegated_lamports
-            + active_lamports
-            + activating_lamports
-            + deactivating_lamports,
-        active_lamports,
-        activating_lamports,
-        deactivating_lamports,
-        inflation_rewards,
-        jito_rewards,
-        apr_baseline: apr_potential,
-        apy_baseline: apr_to_apy(apr_potential, epochs_per_year),
-        apr_effective,
-        apy_effective: apr_to_apy(apr_effective, epochs_per_year),
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SoceanStakePoolMeta {
     /// Pool address
@@ -158,8 +62,6 @@ pub struct SoceanStakePoolMeta {
     pub mint: String,
     /// Pool manager
     pub manager: String,
-    /// Epoch duration in seconds - calculated from first and last slot times
-    pub epoch_duration: u64,
     /// Flag indicating whether the pool is in a valid state, i.e. initialized
     pub is_valid: bool,
     /// Flag indicating whether the pool still needs to be updated this epoch
@@ -176,6 +78,106 @@ pub struct SoceanStakePoolMeta {
     pub reserve_stake: u64,
     /// Relevant datapoints for each validator in the pool
     pub validators: Vec<SplStakePoolValidator>,
+}
+
+impl StakePoolMetaApi for SoceanStakePoolMeta {
+    fn address(&self) -> String {
+        self.address.to_string()
+    }
+
+    fn manager(&self) -> String {
+        self.manager.to_string()
+    }
+
+    fn mint(&self) -> String {
+        self.mint.to_string()
+    }
+
+    fn provider(&self) -> String {
+        "Socean".to_string()
+    }
+
+    fn lamports_allocation(&self) -> LamportsAllocation {
+        self.validators.iter().fold(
+            LamportsAllocation {
+                active: 0,
+                activating: 0,
+                deactivating: 0,
+                undelegated: self.reserve_stake,
+            },
+            |mut acc, validator_meta| {
+                acc.active = acc.active + validator_meta.active_stake;
+                acc.activating = acc.activating + validator_meta.activating_stake;
+                acc.deactivating = acc.deactivating + validator_meta.deactivating_stake;
+                acc.undelegated = acc.undelegated + validator_meta.undelegated_stake;
+
+                acc
+            },
+        )
+    }
+
+    fn rewards(&self) -> Rewards {
+        self.validators.iter().fold(
+            Rewards {
+                inflation: 0,
+                jito: 0,
+            },
+            |mut acc, validator_meta| {
+                acc.inflation = acc.inflation + validator_meta.inflation_rewards;
+                acc.jito = acc.jito + validator_meta.jito_rewards;
+
+                acc
+            },
+        )
+    }
+
+    fn is_valid(&self) -> bool {
+        self.is_valid && !self.needs_update
+    }
+
+    fn lst_price(&self) -> f64 {
+        if self.pool_token_supply == 0 {
+            0.0
+        } else {
+            self.total_lamports as f64 / self.pool_token_supply as f64
+        }
+    }
+
+    fn lst_supply(&self) -> u64 {
+        self.pool_token_supply
+    }
+
+    fn management_fee(&self) -> f64 {
+        if self.fees.epoch.denominator == 0 {
+            0.0
+        } else {
+            self.fees.epoch.numerator as f64 / self.fees.epoch.denominator as f64
+        }
+    }
+
+    fn fetch_live_lst_price(&self, rpc_client: &RpcClient) -> f64 {
+        let stake_pool_account = rpc_client
+            .get_account(&Pubkey::from_str(&self.address).unwrap())
+            .unwrap();
+        let stake_pool = try_from_slice_unchecked::<StakePool>(stake_pool_account.data()).unwrap();
+
+        if stake_pool.pool_token_supply == 0 {
+            return 0f64;
+        }
+
+        stake_pool.total_stake_lamports as f64 / stake_pool.pool_token_supply as f64
+    }
+
+    fn staked_validator_count(&self) -> u64 {
+        self.validators
+            .iter()
+            .filter(|v| {
+                v.activating_stake + v.deactivating_stake + v.active_stake + v.undelegated_stake
+                    > 1_000_000_000
+                    && v.status == "Active"
+            })
+            .count() as u64
+    }
 }
 
 impl SoceanStakePoolMeta {
@@ -246,11 +248,6 @@ impl SoceanStakePoolMeta {
             unreachable!()
         };
 
-        let epoch_schedule = bank.epoch_schedule();
-        let epoch_duration = get_epoch_duration(rpc_client, epoch_schedule, bank.epoch())
-            .to_u64()
-            .unwrap();
-
         let lst_price = if stake_pool.pool_token_supply == 0 {
             0.0
         } else {
@@ -261,7 +258,6 @@ impl SoceanStakePoolMeta {
             address: stake_pool_address.to_string(),
             mint: stake_pool.pool_mint.to_string(),
             manager: stake_pool.manager.to_string(),
-            epoch_duration,
             is_valid: stake_pool.is_valid(),
             needs_update: stake_pool.last_update_epoch < bank.epoch(),
             total_lamports: stake_pool.total_stake_lamports,
@@ -454,18 +450,4 @@ impl SplStakePoolValidator {
             jito_rewards,
         }
     }
-}
-
-fn fetch_current_socean_stake_pool_price(
-    rpc_client: &RpcClient,
-    stake_pool_address: Pubkey,
-) -> f64 {
-    let stake_pool_account = rpc_client.get_account(&stake_pool_address).unwrap();
-    let stake_pool = try_from_slice_unchecked::<StakePool>(stake_pool_account.data()).unwrap();
-
-    if stake_pool.pool_token_supply == 0 {
-        return 0f64;
-    }
-
-    stake_pool.total_stake_lamports as f64 / stake_pool.pool_token_supply as f64
 }

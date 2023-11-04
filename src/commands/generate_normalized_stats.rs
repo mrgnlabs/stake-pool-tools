@@ -1,11 +1,9 @@
 use {
     super::generate_metas::read_from_json_file,
     crate::{
-        commands::generate_metas::StakePoolMeta,
+        apr_to_apy, compute_effective_stake_pool_apr,
         providers::{
-            marinade::{generate_marinade_stake_pool_stats, MarinadeStakePoolMeta},
-            socean::{generate_socean_stake_pool_stats, SoceanStakePoolMeta},
-            spl::{generate_spl_stake_pool_stats, SplStakePoolMeta},
+            LamportsAllocation, Rewards, StakePoolMeta, StakePoolMetaApi, SECONDS_PER_DAY,
         },
     },
     log::{debug, info, warn},
@@ -18,6 +16,10 @@ use {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EpochStakePoolStatsCollection {
     pub epoch: u64,
+    pub total_sol_supply: u64,
+    pub total_native_stake: u64,
+    pub total_liquid_stake: u64,
+    pub total_undelegated_lamports: u64,
     pub stake_pools: Vec<EpochStakePoolStats>,
 }
 
@@ -30,8 +32,8 @@ pub struct EpochStakePoolStats {
     pub is_valid: bool,
     pub mint: String,
     pub lst_price: f64,
+    pub lst_supply: u64,
     pub staked_validator_count: u64,
-    pub pool_token_supply: u64,
     pub undelegated_lamports: u64,
     pub total_lamports_locked: u64,
     pub active_lamports: u64,
@@ -43,6 +45,7 @@ pub struct EpochStakePoolStats {
     pub apy_baseline: f64,
     pub apr_effective: f64,
     pub apy_effective: f64,
+    pub liquidity_delta: i128,
 }
 
 pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_path: &str) {
@@ -60,7 +63,6 @@ pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_pa
 
     let next_epoch_metas_path = metas_dir.join(format!("stake_pool_metas_{}.json", epoch + 1));
     let next_epoch_metas = read_from_json_file(&next_epoch_metas_path).ok();
-
     if next_epoch_metas.is_none() {
         warn!(
             "Stake pool metas for following epoch ({}) not found, effective APY will be based off live data",
@@ -68,135 +70,70 @@ pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_pa
         );
     }
 
-    let mut stats: Vec<EpochStakePoolStats> = vec![];
-
-    // SPL
-
-    let spl_pools: Vec<&SplStakePoolMeta> = target_epoch_metas
-        .stake_pools
-        .iter()
-        .filter_map(|stake_pool| match stake_pool {
-            StakePoolMeta::Spl(target_epoch_meta) => Some(target_epoch_meta),
-            _ => None,
-        })
-        .collect::<Vec<&SplStakePoolMeta>>();
-
-    if !spl_pools.is_empty() {
-        stats = spl_pools
-            .iter()
-            .map(|target_epoch_meta| {
-                debug!("stake_pool: {:?}", target_epoch_meta.address);
-
-                let next_epoch_meta = if let Some(next_epoch_metas) = &next_epoch_metas {
-                    next_epoch_metas
-                        .stake_pools
-                        .iter()
-                        .find_map(|next_epoch_meta| {
-                            if let StakePoolMeta::Spl(next_epoch_meta) = next_epoch_meta {
-                                if next_epoch_meta.address == target_epoch_meta.address {
-                                    Some(next_epoch_meta.clone())
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                } else {
-                    None
-                };
-
-                generate_spl_stake_pool_stats(&rpc_client, target_epoch_meta, next_epoch_meta)
-            })
-            .collect();
+    let prev_epoch_metas_path = metas_dir.join(format!("stake_pool_metas_{}.json", epoch - 1));
+    let prev_epoch_metas = read_from_json_file(&prev_epoch_metas_path).ok();
+    if prev_epoch_metas.is_none() {
+        warn!(
+            "Stake pool metas for previous epoch ({}) not found, liquidity change will default to 0",
+            epoch
+        );
     }
 
-    // Marinade
-
-    let marinade_pools: Vec<&MarinadeStakePoolMeta> = target_epoch_metas
+    let stats: Vec<EpochStakePoolStats> = target_epoch_metas
         .stake_pools
         .iter()
-        .filter_map(|stake_pool| match stake_pool {
-            StakePoolMeta::Marinade(target_epoch_meta) => Some(target_epoch_meta),
-            _ => None,
-        })
-        .collect::<Vec<&MarinadeStakePoolMeta>>();
+        .map(|target_pool_meta| {
+            debug!("stake_pool: {:?}", target_pool_meta.address());
 
-    if !spl_pools.is_empty() {
-        stats.extend(marinade_pools.iter().map(|target_epoch_meta| {
             let next_epoch_meta = if let Some(next_epoch_metas) = &next_epoch_metas {
                 next_epoch_metas
                     .stake_pools
                     .iter()
-                    .find_map(|next_epoch_meta| {
-                        if let StakePoolMeta::Marinade(next_epoch_meta) = next_epoch_meta {
-                            if next_epoch_meta.address == target_epoch_meta.address {
-                                Some(next_epoch_meta.clone())
-                            } else {
-                                None
-                            }
+                    .find(|next_epoch_meta| {
+                        if let StakePoolMeta::Spl(next_epoch_meta) = next_epoch_meta {
+                            next_epoch_meta.address == target_pool_meta.address()
                         } else {
-                            None
+                            false
                         }
                     })
+                    .cloned()
             } else {
                 None
             };
 
-            generate_marinade_stake_pool_stats(&rpc_client, target_epoch_meta, next_epoch_meta)
-        }));
-    }
+            let prev_epoch_meta = if let Some(prev_epoch_metas) = &prev_epoch_metas {
+                prev_epoch_metas
+                    .stake_pools
+                    .iter()
+                    .find(|prev_epoch_meta| {
+                        if let StakePoolMeta::Spl(prev_epoch_meta) = prev_epoch_meta {
+                            prev_epoch_meta.address == target_pool_meta.address()
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+            } else {
+                None
+            };
 
-    // Socean
-
-    let socean_pools: Vec<&SoceanStakePoolMeta> = target_epoch_metas
-        .stake_pools
-        .iter()
-        .filter_map(|stake_pool| match stake_pool {
-            StakePoolMeta::Socean(target_epoch_meta) => Some(target_epoch_meta),
-            _ => None,
+            generate_stake_pool_stats(
+                &rpc_client,
+                target_pool_meta,
+                target_epoch_metas.epoch_duration,
+                prev_epoch_meta,
+                next_epoch_meta,
+            )
         })
-        .collect::<Vec<&SoceanStakePoolMeta>>();
-
-    if !socean_pools.is_empty() {
-        stats.extend(
-            socean_pools
-                .iter()
-                .map(|target_epoch_meta| {
-                    debug!("stake_pool: {:?}", target_epoch_meta.address);
-
-                    let next_epoch_meta = if let Some(next_epoch_metas) = &next_epoch_metas {
-                        next_epoch_metas
-                            .stake_pools
-                            .iter()
-                            .find_map(|next_epoch_meta| {
-                                if let StakePoolMeta::Socean(next_epoch_meta) = next_epoch_meta {
-                                    if next_epoch_meta.address == target_epoch_meta.address {
-                                        Some(next_epoch_meta.clone())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                    } else {
-                        None
-                    };
-
-                    generate_socean_stake_pool_stats(
-                        &rpc_client,
-                        target_epoch_meta,
-                        next_epoch_meta,
-                    )
-                })
-                .collect::<Vec<EpochStakePoolStats>>(),
-        );
-    }
+        .collect();
 
     write_to_json_file(
         &EpochStakePoolStatsCollection {
             epoch: epoch.clone(),
+            total_sol_supply: target_epoch_metas.total_sol_supply,
+            total_native_stake: target_epoch_metas.total_native_stake,
+            total_liquid_stake: target_epoch_metas.total_liquid_stake,
+            total_undelegated_lamports: target_epoch_metas.total_undelegated_lamports,
             stake_pools: stats,
         },
         out_path,
@@ -209,4 +146,72 @@ fn write_to_json_file(stake_pools_metas: &EpochStakePoolStatsCollection, out_pat
     let json = serde_json::to_string_pretty(&stake_pools_metas).unwrap();
     writer.write_all(json.as_bytes()).unwrap();
     writer.flush().unwrap();
+}
+
+pub fn generate_stake_pool_stats(
+    rpc_client: &RpcClient,
+    target_epoch_meta: &StakePoolMeta,
+    target_epoch_duration: u64,
+    prev_epoch_meta: Option<StakePoolMeta>,
+    next_epoch_meta: Option<StakePoolMeta>,
+) -> EpochStakePoolStats {
+    let LamportsAllocation {
+        active: active_lamports,
+        activating: activating_lamports,
+        deactivating: deactivating_lamports,
+        ..
+    } = target_epoch_meta.lamports_allocation();
+
+    let Rewards {
+        jito: jito_rewards,
+        inflation: inflation_rewards,
+    } = target_epoch_meta.rewards();
+
+    let epochs_per_year = (SECONDS_PER_DAY as f64 * 365.0) / target_epoch_duration as f64;
+
+    let apr_potential = target_epoch_meta.total_rewards() as f64
+        / target_epoch_meta.yielding_lamports() as f64
+        * (epochs_per_year as f64);
+
+    let next_epoch_lst_price = if let Some(next_epoch_meta) = next_epoch_meta {
+        next_epoch_meta.lst_price()
+    } else {
+        target_epoch_meta.fetch_live_lst_price(&rpc_client)
+    };
+
+    let total_lamports_locked = target_epoch_meta.total_lamports();
+
+    let liquidity_delta = prev_epoch_meta.map_or(0, |prev_epoch_meta| {
+        total_lamports_locked as i128 - prev_epoch_meta.total_lamports() as i128
+    });
+
+    let apr_effective = compute_effective_stake_pool_apr(
+        target_epoch_meta.lst_price(),
+        next_epoch_lst_price,
+        epochs_per_year as f64,
+    );
+
+    EpochStakePoolStats {
+        address: target_epoch_meta.address(),
+        manager: target_epoch_meta.manager(),
+        provider: target_epoch_meta.provider(),
+        management_fee: target_epoch_meta.management_fee(),
+        is_valid: target_epoch_meta.is_valid(),
+        mint: target_epoch_meta.mint(),
+        lst_price: target_epoch_meta.lst_price(),
+        staked_validator_count: target_epoch_meta.staked_validator_count(),
+        lst_supply: target_epoch_meta.lst_supply(),
+        undelegated_lamports: target_epoch_meta.undelegated_lamports(),
+        total_lamports_locked,
+        active_lamports,
+        activating_lamports,
+        deactivating_lamports,
+        liquidity_delta,
+        inflation_rewards,
+        jito_rewards,
+        apr_baseline: apr_potential,
+        apy_baseline: apr_to_apy(apr_potential, epochs_per_year),
+        apr_effective,
+        apy_effective: apr_to_apy(apr_effective, epochs_per_year),
+    }
 }

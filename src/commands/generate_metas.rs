@@ -1,9 +1,9 @@
 use {
     crate::{
+        get_epoch_duration,
         providers::{
-            marinade::{generate_marinade_stake_pool_meta, MarinadeStakePoolMeta},
-            socean::{generate_socean_stake_pool_metas, SoceanStakePoolMeta},
-            spl::{generate_spl_stake_pool_metas, SplStakePoolMeta},
+            marinade::generate_marinade_stake_pool_meta, socean::generate_socean_stake_pool_metas,
+            spl::generate_spl_stake_pool_metas, StakePoolMeta, StakePoolMetaApi, StakePoolsMetas,
         },
         vendors::{
             jito::{
@@ -16,7 +16,7 @@ use {
         },
     },
     log::info,
-    serde::{Deserialize, Serialize},
+    num_traits::ToPrimitive,
     solana_accounts_db::{
         accounts_index::{
             AccountIndex, AccountSecondaryIndexes, AccountSecondaryIndexesIncludeExclude,
@@ -53,21 +53,6 @@ impl Display for GenerateMetasError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self, f)
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StakePoolsMetas {
-    pub stake_pools: Vec<StakePoolMeta>,
-    pub bank_hash: String,
-    pub epoch: u64,
-    pub slot: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum StakePoolMeta {
-    Spl(SplStakePoolMeta),
-    Marinade(MarinadeStakePoolMeta),
-    Socean(SoceanStakePoolMeta),
 }
 
 pub fn process_generate_stake_pool_metas(ledger_path: &Path, snapshot_slot: &Slot, out_path: &str) {
@@ -177,10 +162,39 @@ pub fn generate_stake_pool_metas(bank: &Arc<Bank>) -> StakePoolsMetas {
         generate_socean_stake_pool_metas(bank, &rpc_client, &jito_rewards_lookup);
     stake_pools.extend(socean_stake_pools.into_iter().map(StakePoolMeta::Socean));
 
+    let total_sol_supply = {
+        let total_supply = bank.capitalization();
+        let non_circulating_supply =
+            solana_runtime::non_circulating_supply::calculate_non_circulating_supply(&bank)
+                .expect("Scan should not error on root banks")
+                .lamports;
+
+        total_supply - non_circulating_supply
+    };
+    let total_native_stake = bank.total_epoch_stake();
+    let total_liquid_stake = stake_pools
+        .iter()
+        .map(|pool| pool.delegated_lamports())
+        .sum();
+    let total_undelegated_lamports = stake_pools
+        .iter()
+        .map(|pool| pool.undelegated_lamports())
+        .sum();
+
+    let epoch_schedule = bank.epoch_schedule();
+    let epoch_duration = get_epoch_duration(&rpc_client, epoch_schedule, bank.epoch())
+        .to_u64()
+        .unwrap();
+
     StakePoolsMetas {
         stake_pools,
         bank_hash: bank.hash().to_string(),
+        total_sol_supply,
+        total_native_stake,
+        total_liquid_stake,
+        total_undelegated_lamports,
         epoch: bank.epoch(),
+        epoch_duration,
         slot: bank.slot(),
     }
 }
