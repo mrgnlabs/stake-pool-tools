@@ -25,4 +25,4 @@ The process is simple:
 - Assumes all jito rewards were collected prior to the stake pool validator list being updated
 - Does not distinguish jito rewards from potential "donations" to stake accounts
 - Rather than mirror the logic, inflation rewards are currently fetched through a RPC call
-- The effective APY is based on the LST price appreciation, and therefore obtained from the snaphshot at epoch N+1 when available, or through the live pool state if N+1 is the current epoch. A consequence of this is that the pools' effective APY for the latest complete epoch will likely change once the following epoch completes.
+- The effective APY is based on the LST price appreciation, and therefore obtained from the snapshot at epoch N+1 when available, or through the live pool state if N+1 is the current epoch. A consequence of this is that the pools' effective APY for the latest complete epoch will likely change once the following epoch completes.
