@@ -89,13 +89,7 @@ pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_pa
                 next_epoch_metas
                     .stake_pools
                     .iter()
-                    .find(|next_epoch_meta| {
-                        if let StakePoolMeta::Spl(next_epoch_meta) = next_epoch_meta {
-                            next_epoch_meta.address == target_pool_meta.address()
-                        } else {
-                            false
-                        }
-                    })
+                    .find(|next_epoch_meta| next_epoch_meta.address() == target_pool_meta.address())
                     .cloned()
             } else {
                 None
@@ -105,13 +99,7 @@ pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_pa
                 prev_epoch_metas
                     .stake_pools
                     .iter()
-                    .find(|prev_epoch_meta| {
-                        if let StakePoolMeta::Spl(prev_epoch_meta) = prev_epoch_meta {
-                            prev_epoch_meta.address == target_pool_meta.address()
-                        } else {
-                            false
-                        }
-                    })
+                    .find(|prev_epoch_meta| prev_epoch_meta.address() == target_pool_meta.address())
                     .cloned()
             } else {
                 None
