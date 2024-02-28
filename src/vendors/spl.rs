@@ -59,20 +59,21 @@ pub struct StakePool {
     /// Account type, must be StakePool currently
     pub account_type: AccountType,
 
-    /// Manager authority, allows for updating the staker, manager, and fee account
+    /// Manager authority, allows for updating the staker, manager, and fee
+    /// account
     pub manager: Pubkey,
 
-    /// Staker authority, allows for adding and removing validators, and managing stake
-    /// distribution
+    /// Staker authority, allows for adding and removing validators, and
+    /// managing stake distribution
     pub staker: Pubkey,
 
     /// Stake deposit authority
     ///
-    /// If a depositor pubkey is specified on initialization, then deposits must be
-    /// signed by this authority. If no deposit authority is specified,
+    /// If a depositor pubkey is specified on initialization, then deposits must
+    /// be signed by this authority. If no deposit authority is specified,
     /// then the stake pool will default to the result of:
     /// `Pubkey::find_program_address(
-    ///     &[&stake_pool_address.to_bytes()[..32], b"deposit"],
+    ///     &[&stake_pool_address.as_ref(), b"deposit"],
     ///     program_id,
     /// )`
     pub stake_deposit_authority: Pubkey,
@@ -101,7 +102,8 @@ pub struct StakePool {
     /// this field may not be accurate
     pub total_lamports: u64,
 
-    /// Total supply of pool tokens (should always match the supply in the Pool Mint)
+    /// Total supply of pool tokens (should always match the supply in the Pool
+    /// Mint)
     pub pool_token_supply: u64,
 
     /// Last epoch the `total_lamports` field was updated
@@ -114,7 +116,7 @@ pub struct StakePool {
     pub epoch_fee: Fee,
 
     /// Fee for next epoch
-    pub next_epoch_fee: Option<Fee>,
+    pub next_epoch_fee: FutureEpoch<Fee>,
 
     /// Preferred deposit validator vote account pubkey
     pub preferred_deposit_validator_vote_address: Option<Pubkey>,
@@ -129,12 +131,13 @@ pub struct StakePool {
     pub stake_withdrawal_fee: Fee,
 
     /// Future stake withdrawal fee, to be set for the following epoch
-    pub next_stake_withdrawal_fee: Option<Fee>,
+    pub next_stake_withdrawal_fee: FutureEpoch<Fee>,
 
     /// Fees paid out to referrers on referred stake deposits.
     /// Expressed as a percentage (0 - 100) of deposit fees.
-    /// i.e. `stake_deposit_fee`% of stake deposited is collected as deposit fees for every deposit
-    /// and `stake_referral_fee`% of the collected stake deposit fees is paid out to the referrer
+    /// i.e. `stake_deposit_fee`% of stake deposited is collected as deposit
+    /// fees for every deposit and `stake_referral_fee`% of the collected
+    /// stake deposit fees is paid out to the referrer
     pub stake_referral_fee: u8,
 
     /// Toggles whether the `DepositSol` instruction requires a signature from
@@ -146,8 +149,9 @@ pub struct StakePool {
 
     /// Fees paid out to referrers on referred SOL deposits.
     /// Expressed as a percentage (0 - 100) of SOL deposit fees.
-    /// i.e. `sol_deposit_fee`% of SOL deposited is collected as deposit fees for every deposit
-    /// and `sol_referral_fee`% of the collected SOL deposit fees is paid out to the referrer
+    /// i.e. `sol_deposit_fee`% of SOL deposited is collected as deposit fees
+    /// for every deposit and `sol_referral_fee`% of the collected SOL
+    /// deposit fees is paid out to the referrer
     pub sol_referral_fee: u8,
 
     /// Toggles whether the `WithdrawSol` instruction requires a signature from
@@ -158,7 +162,7 @@ pub struct StakePool {
     pub sol_withdrawal_fee: Fee,
 
     /// Future SOL withdrawal fee, to be set for the following epoch
-    pub next_sol_withdrawal_fee: Option<Fee>,
+    pub next_sol_withdrawal_fee: FutureEpoch<Fee>,
 
     /// Last epoch's total pool tokens, used only for APR estimation
     pub last_epoch_pool_token_supply: u64,
