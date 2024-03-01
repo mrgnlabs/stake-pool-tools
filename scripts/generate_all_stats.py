@@ -26,6 +26,9 @@ def main():
 
     metas_dir = os.path.realpath(os.path.join(script_dir, "..", "output"))
 
+    solana_client = SolanaClient(rpc_endpoint)
+    live_epoch = solana_client.get_epoch_info().value.epoch
+
     metas_files = os.listdir(metas_dir)
     metas_files.sort()
     metas_file_regex = "stake_pool_metas_([0-9]+).json"
@@ -47,19 +50,25 @@ def main():
                 os.path.join(metas_dir, f"stats_{target_epoch}.json")
             )
 
+            is_latest = target_epoch == (live_epoch - 1)
+
             print(f"Generating stats for epoch {target_epoch}...")
             env = os.environ.copy()
             env["RUST_LOG"] = "error"
+            cmd = [
+                str(bin_path),
+                "--metas-dir",
+                str(metas_dir),
+                "--out-path",
+                str(output_path),
+                "--epoch",
+                str(target_epoch),
+            ]
+            if is_latest:
+                cmd.append("--use-live-price-fallback")
+
             subprocess.run(
-                [
-                    str(bin_path),
-                    "--metas-dir",
-                    str(metas_dir),
-                    "--out-path",
-                    str(output_path),
-                    "--epoch",
-                    str(target_epoch),
-                ],
+                cmd,
                 env=env,
             )
             print(f"Done processing epoch {target_epoch}")

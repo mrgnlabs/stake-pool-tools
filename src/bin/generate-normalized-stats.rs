@@ -22,11 +22,20 @@ struct Args {
     /// The target epoch.
     #[arg(long, env)]
     epoch: Epoch,
+
+    /// Use live price fallback (use for latest epoch).
+    #[arg(long, env)]
+    use_live_price_fallback: bool,
 }
 
 fn main() {
     env_logger::init();
     dotenv().ok();
     let args: Args = Args::parse();
-    process_generate_normalized_stats(&args.metas_dir, &args.epoch, &args.out_path);
+    process_generate_normalized_stats(
+        &args.metas_dir,
+        &args.epoch,
+        &args.out_path,
+        args.use_live_price_fallback,
+    );
 }

@@ -7,10 +7,15 @@ use {
         },
     },
     log::{debug, info, warn},
+    num_traits::Zero,
     serde::{Deserialize, Serialize},
     solana_client::rpc_client::RpcClient,
     solana_program::stake_history::Epoch,
-    std::{fs::File, io::BufWriter, io::Write, path::Path},
+    std::{
+        fs::File,
+        io::{BufWriter, Write},
+        path::Path,
+    },
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,7 +53,12 @@ pub struct EpochStakePoolStats {
     pub liquidity_delta: i128,
 }
 
-pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_path: &str) {
+pub fn process_generate_normalized_stats(
+    metas_dir: &Path,
+    epoch: &Epoch,
+    out_path: &str,
+    use_live_price_fallback: bool,
+) {
     let target_epoch_metas_path = metas_dir.join(format!("stake_pool_metas_{}.json", epoch));
     let target_epoch_metas = read_from_json_file(&target_epoch_metas_path).unwrap();
 
@@ -111,6 +121,7 @@ pub fn process_generate_normalized_stats(metas_dir: &Path, epoch: &Epoch, out_pa
                 target_epoch_metas.epoch_duration,
                 prev_epoch_meta,
                 next_epoch_meta,
+                use_live_price_fallback,
             )
         })
         .collect();
@@ -142,6 +153,7 @@ pub fn generate_stake_pool_stats(
     target_epoch_duration: u64,
     prev_epoch_meta: Option<StakePoolMeta>,
     next_epoch_meta: Option<StakePoolMeta>,
+    use_live_price_fallback: bool,
 ) -> EpochStakePoolStats {
     let LamportsAllocation {
         active: active_lamports,
@@ -163,8 +175,10 @@ pub fn generate_stake_pool_stats(
 
     let next_epoch_lst_price = if let Some(next_epoch_meta) = next_epoch_meta {
         next_epoch_meta.lst_price()
-    } else {
+    } else if use_live_price_fallback {
         target_epoch_meta.fetch_live_lst_price(&rpc_client)
+    } else {
+        0.0
     };
 
     let total_lamports_locked = target_epoch_meta.total_lamports();
@@ -173,11 +187,15 @@ pub fn generate_stake_pool_stats(
         total_lamports_locked as i128 - prev_epoch_meta.total_lamports() as i128
     });
 
-    let apr_effective = compute_effective_stake_pool_apr(
-        target_epoch_meta.lst_price(),
-        next_epoch_lst_price,
-        epochs_per_year as f64,
-    );
+    let apr_effective = if !next_epoch_lst_price.is_zero() {
+        compute_effective_stake_pool_apr(
+            target_epoch_meta.lst_price(),
+            next_epoch_lst_price,
+            epochs_per_year as f64,
+        )
+    } else {
+        0.0
+    };
 
     EpochStakePoolStats {
         address: target_epoch_meta.address(),
